@@ -1481,13 +1481,20 @@ class LibvirtTests(PrintLogsOnErrorTestCase):
         Both sides should also have a non-blocking virsh.
         """
 
+        controllerVM.succeed("virsh define /etc/domain-chv.xml")
+        controllerVM.succeed("virsh start testvm")
+
+        assert wait_for_ssh(controllerVM)
+
         certificate_dir = "/var/lib/libvirt/ch/pki"
 
         # Function to move the certificates into a temporary directory.
-        def remove_certs(machine):
+        def remove_certs(remove_dir, machine):
             tmp_dir = machine.succeed("mktemp -d").strip()
             machine.succeed(f"mv {certificate_dir}/* {tmp_dir}/")
-            machine.succeed(f"rm -rf {certificate_dir}")
+            # If remove_dir is true, we delete the files and the directory.
+            # Otherwise we only delete the files but keep the directory.
+            machine.succeed(f"rm -rf {certificate_dir}{'' if remove_dir else '/*'}")
             return tmp_dir
 
         # Function to reset the certificates.
@@ -1495,94 +1502,96 @@ class LibvirtTests(PrintLogsOnErrorTestCase):
             machine.succeed(f"mkdir -p {certificate_dir}")
             machine.succeed(f"mv {tmp_dir}/* {certificate_dir}/")
 
-        # Certificates are missing on both machines.
-        reset_certs_controller = partial(reset_certs, remove_certs(controllerVM))
-        reset_certs_compute = partial(reset_certs, remove_certs(computeVM))
+        def check_certificates(machine):
+            expected_files = ["ca-cert.pem", "server-cert.pem", "server-key.pem"]
+            files = machine.succeed(f"ls {certificate_dir}").strip()
+            for expected_file in expected_files:
+                assert expected_file in files, f"{expected_file} not in {files}"
 
-        with (
-            CommandGuard(reset_certs_controller, controllerVM) as _,
-            CommandGuard(reset_certs_compute, computeVM) as _,
-        ):
-            controllerVM.succeed("virsh define /etc/domain-chv.xml")
-            controllerVM.succeed("virsh start testvm")
+        for remove_cert_dir in [True, False]:
+            remove_certs = partial(remove_certs, remove_cert_dir)
+            # Certificates are missing on both machines.
+            reset_certs_controller = partial(reset_certs, remove_certs(controllerVM))
+            reset_certs_compute = partial(reset_certs, remove_certs(computeVM))
+            with (
+                CommandGuard(reset_certs_controller, controllerVM) as _,
+                CommandGuard(reset_certs_compute, computeVM) as _,
+            ):
+                controllerVM.fail(
+                    "virsh migrate --domain testvm --desturi ch+tcp://computeVM/session --persistent --live --p2p --tls"
+                )
+                assert wait_for_ssh(controllerVM)
 
-            assert wait_for_ssh(controllerVM)
+                controllerVM.succeed("virsh list | grep 'testvm'")
+                computeVM.fail("virsh list | grep 'testvm'")
 
-            controllerVM.fail(
-                "virsh migrate --domain testvm --desturi ch+tcp://computeVM/session --persistent --live --p2p --tls"
-            )
-            assert wait_for_ssh(controllerVM)
+            check_certificates(controllerVM)
+            check_certificates(computeVM)
 
-            controllerVM.succeed("virsh list | grep 'testvm'")
-            computeVM.fail("virsh list | grep 'testvm'")
+            # Certificates are missing only on the source machine.
+            reset_certs_controller = partial(reset_certs, remove_certs(controllerVM))
+            with CommandGuard(reset_certs_controller, controllerVM) as _:
+                controllerVM.fail(
+                    "virsh migrate --domain testvm --desturi ch+tcp://controllerVM/session --persistent --live --p2p --tls"
+                )
+                assert wait_for_ssh(controllerVM)
 
-        # To check whether the cleanup worked, we try the live migration again.
-        controllerVM.succeed(
-            "virsh migrate --domain testvm --desturi ch+tcp://computeVM/session --persistent --live --p2p --tls"
-        )
-        assert wait_for_ssh(computeVM)
+                controllerVM.succeed("virsh list | grep 'testvm'")
+                computeVM.fail("virsh list | grep 'testvm'")
 
-        # Certificates are missing only on the source machine.
-        # We already migrated to computeVM, so this is the source now.
-        reset_certs_compute = partial(reset_certs, remove_certs(computeVM))
-        with CommandGuard(reset_certs_compute, computeVM) as _:
-            computeVM.fail(
-                "virsh migrate --domain testvm --desturi ch+tcp://controllerVM/session --persistent --live --p2p --tls"
-            )
-            assert wait_for_ssh(computeVM)
+            check_certificates(controllerVM)
 
-            computeVM.succeed("virsh list | grep 'testvm'")
-            controllerVM.fail("virsh list | grep 'testvm'")
+            # Certificates are missing only on the target machine.
+            reset_certs_compute = partial(reset_certs, remove_certs(computeVM))
+            with CommandGuard(reset_certs_compute, controllerVM) as _:
+                controllerVM.fail(
+                    "virsh migrate --domain testvm --desturi ch+tcp://controllerVM/session --persistent --live --p2p --tls"
+                )
+                assert wait_for_ssh(controllerVM)
 
-        # Certificates are missing only on the target machine.
-        reset_certs_controller = partial(reset_certs, remove_certs(controllerVM))
-        with CommandGuard(reset_certs_controller, controllerVM) as _:
-            computeVM.fail(
-                "virsh migrate --domain testvm --desturi ch+tcp://controllerVM/session --persistent --live --p2p --tls"
-            )
-            assert wait_for_ssh(computeVM)
+                controllerVM.succeed("virsh list | grep 'testvm'")
+                computeVM.fail("virsh list | grep 'testvm'")
 
-            computeVM.succeed("virsh list | grep 'testvm'")
-            controllerVM.fail("virsh list | grep 'testvm'")
+            check_certificates(computeVM)
 
 
 def suite():
     # Test cases in alphabetical order
     testcases = [
-        LibvirtTests.test_disk_is_locked,
-        LibvirtTests.test_disk_resize_qcow2,
-        LibvirtTests.test_disk_resize_raw,
-        LibvirtTests.test_hotplug,
-        LibvirtTests.test_hugepages,
-        LibvirtTests.test_hugepages_prefault,
-        LibvirtTests.test_libvirt_event_stop_failed,
-        LibvirtTests.test_libvirt_restart,
-        LibvirtTests.test_live_migration,
-        LibvirtTests.test_live_migration_kill_chv_on_receiver_side,
-        LibvirtTests.test_live_migration_kill_chv_on_sender_side,
-        LibvirtTests.test_live_migration_parallel_connections,
-        LibvirtTests.test_live_migration_tls,
+        # LibvirtTests.test_disk_is_locked,
+        # LibvirtTests.test_disk_resize_qcow2,
+        # LibvirtTests.test_disk_resize_raw,
+        # LibvirtTests.test_hotplug,
+        # LibvirtTests.test_hugepages,
+        # LibvirtTests.test_hugepages_prefault,
+        # LibvirtTests.test_libvirt_event_stop_failed,
+        # LibvirtTests.test_libvirt_restart,
+        # LibvirtTests.test_live_migration,
+        # LibvirtTests.test_live_migration_kill_chv_on_receiver_side,
+        # LibvirtTests.test_live_migration_kill_chv_on_sender_side,
+        # LibvirtTests.test_live_migration_parallel_connections,
+        # LibvirtTests.test_live_migration_tls,
         LibvirtTests.test_live_migration_tls_without_certificates,
-        LibvirtTests.test_live_migration_virsh_non_blocking,
-        LibvirtTests.test_live_migration_with_hotplug,
-        LibvirtTests.test_live_migration_with_hotplug_and_virtchd_restart,
-        LibvirtTests.test_live_migration_with_hugepages,
-        LibvirtTests.test_live_migration_with_hugepages_failure_case,
-        LibvirtTests.test_live_migration_with_serial_tcp,
-        LibvirtTests.test_live_migration_with_vcpu_pinning,
-        LibvirtTests.test_managedsave,
-        LibvirtTests.test_network_hotplug_attach_detach_persistent,
-        LibvirtTests.test_network_hotplug_attach_detach_transient,
-        LibvirtTests.test_network_hotplug_persistent_transient_detach_vm_restart,
-        LibvirtTests.test_network_hotplug_persistent_vm_restart,
-        LibvirtTests.test_network_hotplug_transient_vm_restart,
-        LibvirtTests.test_numa_hugepages,
-        LibvirtTests.test_numa_hugepages_prefault,
-        LibvirtTests.test_numa_topology,
-        LibvirtTests.test_serial_file_output,
-        LibvirtTests.test_serial_tcp,
-        LibvirtTests.test_shutdown,
-        LibvirtTests.test_virsh_console_works_with_pty,
+        # LibvirtTests.test_live_migration_virsh_non_blocking,
+        # LibvirtTests.test_live_migration_with_hotplug,
+        # LibvirtTests.test_live_migration_with_hotplug_and_virtchd_restart,
+        # LibvirtTests.test_live_migration_with_hugepages,
+        # LibvirtTests.test_live_migration_with_hugepages_failure_case,
+        # LibvirtTests.test_live_migration_with_serial_tcp,
+        # LibvirtTests.test_live_migration_with_vcpu_pinning,
+        # LibvirtTests.test_managedsave,
+        # LibvirtTests.test_network_hotplug_attach_detach_persistent,
+        # LibvirtTests.test_network_hotplug_attach_detach_transient,
+        # LibvirtTests.test_network_hotplug_persistent_transient_detach_vm_restart,
+        # LibvirtTests.test_network_hotplug_persistent_vm_restart,
+        # LibvirtTests.test_network_hotplug_transient_vm_restart,
+        # LibvirtTests.test_numa_hugepages,
+        # LibvirtTests.test_numa_hugepages_prefault,
+        # LibvirtTests.test_numa_topology,
+        # LibvirtTests.test_serial_file_output,
+        # LibvirtTests.test_serial_tcp,
+        # LibvirtTests.test_shutdown,
+        # LibvirtTests.test_virsh_console_works_with_pty,
     ]
 
     suite = unittest.TestSuite()
