@@ -127,6 +127,9 @@ class LibvirtTests(SaveLogsOnErrorTestCase):
         # Define a libvirt network and automatically starts it
         controllerVM.succeed("virsh net-create /etc/libvirt_test_network.xml")
 
+        allocate_hugepages(controllerVM, NR_HUGEPAGES)
+        allocate_hugepages(computeVM, NR_HUGEPAGES)
+
     def setUp(self):
         # A restart of the libvirt daemon resets the logging configuration, so
         # apply it freshly for every test
@@ -197,8 +200,6 @@ class LibvirtTests(SaveLogsOnErrorTestCase):
 
         # Various cleanup commands to be executed on all machines
         commands = commands + [
-            # Destroy any remaining huge page allocations.
-            "echo 0 > /proc/sys/vm/nr_hugepages",
             "rm -f /tmp/*.expect",
         ]
 
@@ -577,9 +578,6 @@ class LibvirtTests(SaveLogsOnErrorTestCase):
         Test that a VM that utilizes hugepages is still using hugepages after live migration.
         """
 
-        allocate_hugepages(controllerVM, NR_HUGEPAGES)
-        allocate_hugepages(computeVM, NR_HUGEPAGES)
-
         controllerVM.succeed("virsh define /etc/domain-chv-hugepages-prefault.xml")
         controllerVM.succeed("virsh start testvm")
 
@@ -613,7 +611,8 @@ class LibvirtTests(SaveLogsOnErrorTestCase):
         Test that migrating a VM with hugepages to a destination without huge pages will fail gracefully.
         """
 
-        allocate_hugepages(controllerVM, NR_HUGEPAGES)
+        # free only one hugepage on the computeVM
+        allocate_hugepages(computeVM, NR_HUGEPAGES-1)
 
         controllerVM.succeed("virsh define /etc/domain-chv-hugepages-prefault.xml")
         controllerVM.succeed("virsh start testvm")
@@ -626,6 +625,9 @@ class LibvirtTests(SaveLogsOnErrorTestCase):
         wait_for_ssh(controllerVM)
 
         computeVM.fail("virsh list | grep testvm")
+
+        # allocate all hugepages for subsequent tests
+        allocate_hugepages(computeVM, NR_HUGEPAGES)
 
     def test_numa_topology(self):
         """
@@ -664,8 +666,6 @@ class LibvirtTests(SaveLogsOnErrorTestCase):
         Test hugepage on-demand usage for a non-NUMA VM.
         """
 
-        allocate_hugepages(controllerVM, NR_HUGEPAGES)
-
         controllerVM.succeed("virsh define /etc/domain-chv-hugepages.xml")
         controllerVM.succeed("virsh start testvm")
 
@@ -683,8 +683,6 @@ class LibvirtTests(SaveLogsOnErrorTestCase):
         Test hugepage usage with pre-faulting for a non-NUMA VM.
         """
 
-        allocate_hugepages(controllerVM, NR_HUGEPAGES)
-
         controllerVM.succeed("virsh define /etc/domain-chv-hugepages-prefault.xml")
         controllerVM.succeed("virsh start testvm")
 
@@ -699,8 +697,6 @@ class LibvirtTests(SaveLogsOnErrorTestCase):
         """
         Test hugepage on-demand usage for a NUMA VM.
         """
-
-        allocate_hugepages(controllerVM, NR_HUGEPAGES)
 
         controllerVM.succeed("virsh define /etc/domain-chv-numa-hugepages.xml")
         controllerVM.succeed("virsh start testvm")
@@ -723,8 +719,6 @@ class LibvirtTests(SaveLogsOnErrorTestCase):
         """
         Test hugepage usage with pre-faulting for a NUMA VM.
         """
-
-        allocate_hugepages(controllerVM, NR_HUGEPAGES)
 
         controllerVM.succeed("virsh define /etc/domain-chv-numa-hugepages-prefault.xml")
         controllerVM.succeed("virsh start testvm")
