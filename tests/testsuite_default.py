@@ -1020,6 +1020,45 @@ class LibvirtTests(LibvirtTestsBase):  # type: ignore
                 domcapabilities_out,
             )
 
+    def test_often_attach_and_detach(self):
+        """
+        This test attaches and detaches network devices 400 times. The reason is
+        that this failed at around 340 attach/detach cycles when Cloud Hypervisor
+        didn't free GSIs
+        """
+        controllerVM.succeed("virsh define /etc/domain-chv.xml")
+        controllerVM.succeed("virsh start testvm")
+        wait_for_ssh(controllerVM)
+
+        # We have to attach and detach often. Thus to speed things up, we do
+        # not use the hotplug-function, which always checks that the attach or
+        # detach did succeed.
+        num_hotplugs = 0
+        num_devices = 20
+        def hotplug_often():
+            nonlocal num_hotplugs
+            num_old = number_of_devices(controllerVM)
+
+            for i in range(0, num_devices):
+                num_hotplugs += 1
+                command = f"virsh attach-interface --target l33t_n{num_hotplugs:03d} --type network --source libvirt-testnetwork --mac DE:AD:BE:EF:13:{i:02d} --model virtio testvm"
+                controllerVM.succeed(command)
+
+            wait_for_guest_pci_device_enumeration(controllerVM, num_old + num_devices)
+
+        def unplug_often():
+            num_old = number_of_devices(controllerVM)
+
+            for i in range(0, num_devices):
+                command = f"virsh detach-interface testvm network --mac DE:AD:BE:EF:13:{i:02d}"
+                controllerVM.succeed(command)
+
+            wait_for_guest_pci_device_enumeration(controllerVM, num_old - num_devices)
+
+        desired_hotplugs = 400
+        for _ in range(0, int(desired_hotplugs / num_devices)):
+            hotplug_often()
+            unplug_often()
 
 def suite():
     # Test cases sorted in alphabetical order.
@@ -1049,6 +1088,7 @@ def suite():
         LibvirtTests.test_serial_tcp,
         LibvirtTests.test_shutdown,
         LibvirtTests.test_virsh_console_works_with_pty,
+        LibvirtTests.test_often_attach_and_detach,
     ]
 
     suite = unittest.TestSuite()
