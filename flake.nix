@@ -13,7 +13,7 @@
     libvirt.inputs.nixpkgs.follows = "nixpkgs";
 
     # cloud-hypervisor.url = "git+file:<path/to/cloud-hypervisor>";
-    cloud-hypervisor.url = "github:cyberus-technology/cloud-hypervisor?ref=gardenlinux";
+    cloud-hypervisor.url = "github:amphi/cloud-hypervisor?ref=gsi-allocator-bitmap";
     cloud-hypervisor.inputs.nixpkgs.follows = "nixpkgs";
 
     edk2-src.url = "git+https://github.com/cyberus-technology/edk2?ref=gardenlinux&submodules=1";
