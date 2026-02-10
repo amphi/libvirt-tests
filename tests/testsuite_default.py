@@ -1035,6 +1035,7 @@ class LibvirtTests(LibvirtTestsBase):  # type: ignore
         # detach did succeed.
         num_hotplugs = 0
         num_devices = 20
+
         def hotplug_often():
             nonlocal num_hotplugs
             num_old = number_of_devices(controllerVM)
@@ -1059,6 +1060,7 @@ class LibvirtTests(LibvirtTestsBase):  # type: ignore
         for _ in range(0, int(desired_hotplugs / num_devices)):
             hotplug_often()
             unplug_often()
+
 
 def suite():
     # Test cases sorted in alphabetical order.
