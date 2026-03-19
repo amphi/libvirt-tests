@@ -160,7 +160,7 @@ let
                   <model fallback='forbid'>${cpuModel}</model>
                 </cpu>
               ''}
-              <vcpu placement='static'>2</vcpu>
+              <vcpu placement='static'>1</vcpu>
               ${
                 if hugepages then
                   ''
