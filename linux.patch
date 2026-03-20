@@ -1,0 +1,7 @@
+diff --git a/libvirt-tests-kernel-marker b/libvirt-tests-kernel-marker
+new file mode 100644
+index 000000000000..f6ace9bf8f6e
+--- /dev/null
++++ b/libvirt-tests-kernel-marker
+@@ -0,0 +1 @@
++This marker file confirms that Linux kernel patching is enabled for the NixOS image build.

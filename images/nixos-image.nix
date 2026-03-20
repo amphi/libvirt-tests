@@ -2,6 +2,12 @@
 
 {
   nixpkgs,
+  linuxKernelPatches ? [
+    {
+      name = "0001-libvirt-tests-kernel-marker";
+      patch = ../linux.patch;
+    }
+  ],
 }:
 
 nixpkgs.lib.nixosSystem {
@@ -29,6 +35,8 @@ nixpkgs.lib.nixosSystem {
         ];
         boot.initrd.kernelModules = [ "virtio_net" ];
         boot.initrd.systemd.enable = false;
+        # Apply custom Linux kernel patches for the VM image.
+        boot.kernelPatches = linuxKernelPatches;
         boot.kernelParams = [
           "console=ttyS0"
           "earlyprintk=ttyS0"
